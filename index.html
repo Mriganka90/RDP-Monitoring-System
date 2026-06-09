@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RDP Session Tracker</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1117'/%3E%3Crect x='4' y='6' width='24' height='15' rx='2' fill='none' stroke='%231f6feb' stroke-width='2'/%3E%3Crect x='10' y='21' width='12' height='2' rx='1' fill='%2330363d'/%3E%3Crect x='8' y='23' width='16' height='2' rx='1' fill='%2330363d'/%3E%3Ccircle cx='24' cy='10' r='3' fill='%233fb950'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg0: #0d1117;
+    --bg1: #161b22;
+    --bg2: #1c2128;
+    --bg3: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #1f6feb;
+    --accent-soft: rgba(31,111,235,.12);
+    --green: #3fb950;
+    --green-soft: rgba(63,185,80,.12);
+    --yellow: #d29922;
+    --yellow-soft: rgba(210,153,34,.12);
+    --red: #f85149;
+    --red-soft: rgba(248,81,73,.12);
+    --gray-soft: rgba(139,148,158,.1);
+    --mono: 'Courier New', monospace;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg0); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; min-height: 100vh; }
+
+  header { background: var(--bg1); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 50; }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo svg { color: var(--accent); }
+  .logo h1 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
+  .logo span { font-size: 12px; color: var(--muted); margin-left: 4px; }
+  .hdr-right { display: flex; align-items: center; gap: 12px; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .last-update { font-size: 12px; color: var(--muted); }
+  .btn { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: var(--radius); cursor: pointer; font-size: 12px; transition: all .15s; display: flex; align-items: center; gap: 6px; }
+  .btn:hover { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+  .btn svg { transition: transform .4s; }
+  .btn.spinning svg { animation: spin .5s linear; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  main { padding: 20px 24px; max-width: 1400px; margin: 0 auto; }
+
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .metric-card { background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .metric-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .metric-card .value { font-size: 28px; font-weight: 600; line-height: 1; }
+  .metric-card .sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .metric-card.active .value { color: var(--green); }
+  .metric-card.disc .value { color: var(--yellow); }
+  .metric-card.ended .value { color: var(--muted); }
+  .metric-card.hosts .value { color: var(--accent); }
+
+  .controls { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .controls input, .controls select {
+    background: var(--bg1); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 12px; border-radius: var(--radius); font-size: 13px;
+    outline: none; transition: border-color .15s;
+  }
+  .controls input { flex: 1; min-width: 200px; }
+  .controls input::placeholder { color: var(--muted); }
+  .controls input:focus, .controls select:focus { border-color: var(--accent); }
+  .controls select option { background: var(--bg1); }
+
+  .table-wrap { background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .tbl-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .tbl-title { font-size: 13px; font-weight: 500; color: var(--text); }
+  .tbl-count { font-size: 12px; color: var(--muted); background: var(--bg3); padding: 2px 8px; border-radius: 10px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--bg2); color: var(--muted); font-size: 11px; font-weight: 500;
+    text-transform: uppercase; letter-spacing: .5px; padding: 9px 14px;
+    text-align: left; border-bottom: 1px solid var(--border);
+    cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  thead th:hover { color: var(--text); }
+  thead th.sort-asc::after { content: ' ↑'; color: var(--accent); }
+  thead th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--bg2); }
+  td { padding: 10px 14px; color: var(--text); font-size: 13px; white-space: nowrap; }
+
+  .user-cell { display: flex; align-items: center; gap: 8px; }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; flex-shrink: 0; }
+  .user-name { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+
+  .host-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px; font-family: var(--mono); font-size: 11px; }
+  .host-chip .dot-host { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+  .src-ip { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  .time-cell { font-size: 12px; }
+  .time-cell .t { color: var(--text); }
+  .time-cell .d { color: var(--muted); font-size: 11px; }
+
+  .dur { font-family: var(--mono); font-size: 12px; }
+  .dur.live { color: var(--green); }
+  .dur.disc { color: var(--yellow); }
+  .dur.ended { color: var(--muted); }
+
+  .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+  .status-pill.active { background: var(--green-soft); color: var(--green); border: 1px solid rgba(63,185,80,.25); }
+  .status-pill.disconnected { background: var(--yellow-soft); color: var(--yellow); border: 1px solid rgba(210,153,34,.25); }
+  .status-pill.ended { background: var(--gray-soft); color: var(--muted); border: 1px solid rgba(139,148,158,.2); }
+  .status-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .status-dot.active { background: var(--green); box-shadow: 0 0 4px var(--green); animation: pulse 2s infinite; }
+  .status-dot.disconnected { background: var(--yellow); }
+  .status-dot.ended { background: var(--muted); }
+
+  .empty { text-align: center; padding: 40px; color: var(--muted); font-size: 13px; }
+  .empty svg { margin: 0 auto 10px; display: block; opacity: .4; }
+
+  .event-badge { font-family: var(--mono); font-size: 10px; background: var(--bg3); border: 1px solid var(--border); color: var(--muted); border-radius: 4px; padding: 2px 5px; }
+
+  .error-bar { background: var(--red-soft); border: 1px solid var(--red); border-radius: var(--radius); padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: var(--red); display: none; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab { padding: 8px 16px; font-size: 13px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Raw events */
+  .raw-table td { font-family: var(--mono); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+      <circle cx="18" cy="8" r="2" fill="currentColor" stroke="none"/>
+    </svg>
+    <h1>RDP Session Tracker <span>v1.0</span></h1>
+  </div>
+  <div class="hdr-right">
+    <div class="pulse" id="connDot" title="Backend connection status"></div>
+    <span class="last-update" id="lastUpdate">Connecting...</span>
+    <button class="btn" id="refreshBtn" onclick="refreshAll(true)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="errorBar" class="error-bar"></div>
+
+  <div class="metrics" id="metrics">
+    <div class="metric-card active"><div class="label">Active</div><div class="value" id="m-active">–</div><div class="sub">Live sessions</div></div>
+    <div class="metric-card disc"><div class="label">Disconnected</div><div class="value" id="m-disc">–</div><div class="sub">Idle / pending</div></div>
+    <div class="metric-card ended"><div class="label">Ended today</div><div class="value" id="m-ended">–</div><div class="sub">Logged off</div></div>
+    <div class="metric-card hosts"><div class="label">Target hosts</div><div class="value" id="m-hosts">–</div><div class="sub">Unique IPs</div></div>
+    <div class="metric-card"><div class="label">Active users</div><div class="value" id="m-users" style="color:var(--text)">–</div><div class="sub">Distinct accounts</div></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('sessions')">Sessions</div>
+    <div class="tab" onclick="switchTab('raw')">Raw Events</div>
+  </div>
+
+  <!-- Sessions tab -->
+  <div class="tab-panel active" id="tab-sessions">
+    <div class="controls">
+      <input type="text" id="search" placeholder="🔍  Search user, IP, hostname..." oninput="applyFilters()">
+      <select id="f-status" onchange="applyFilters()">
+        <option value="">All statuses</option>
+        <option value="active">Active</option>
+        <option value="disconnected">Disconnected</option>
+        <option value="ended">Ended</option>
+      </select>
+      <select id="f-host" onchange="applyFilters()">
+        <option value="">All hosts</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <div class="tbl-header">
+        <span class="tbl-title">Remote Desktop Sessions</span>
+        <span class="tbl-count" id="rowCount">0 sessions</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortTable('user')">User</th>
+            <th onclick="sortTable('target_ip')">Target Host</th>
+            <th onclick="sortTable('source_ip')">Source IP</th>
+            <th onclick="sortTable('start_time')">Start Time</th>
+            <th onclick="sortTable('end_time')">End Time</th>
+            <th onclick="sortTable('duration')">Duration</th>
+            <th onclick="sortTable('status')">Status</th>
+            <th>Event ID</th>
+          </tr>
+        </thead>
+        <tbody id="sessBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Raw events tab -->
+  <div class="tab-panel" id="tab-raw">
+    <div class="table-wrap">
+      <div class="tbl-header">
+        <span class="tbl-title">Raw Event Log (last 100)</span>
+        <span class="tbl-count" id="rawCount">–</span>
+      </div>
+      <table class="raw-table">
+        <thead>
+          <tr>
+            <th>Received</th>
+            <th>Target IP</th>
+            <th>Event ID</th>
+            <th>User</th>
+            <th>Source IP</th>
+            <th>Logon ID</th>
+            <th>Event Time</th>
+          </tr>
+        </thead>
+        <tbody id="rawBody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const API = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
+  ? 'http://localhost:8000'
+  : window.location.origin;
+const POLL_MS = 10000; // refresh every 10s
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let allSessions  = [];
+let sortKey      = 'start_time';
+let sortDir      = -1;
+let timerRef     = null;
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function elapsed(startIso, endIso) {
+  const start = new Date(startIso);
+  const end   = endIso ? new Date(endIso) : new Date();
+  const ms    = Math.max(0, end - start);
+  const s     = Math.floor(ms / 1000);
+  const h     = Math.floor(s / 3600);
+  const m     = Math.floor((s % 3600) / 60);
+  const sec   = s % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+const COLORS = [
+  ['#1f3a5c','#58a6ff'], ['#3b1f5c','#bc8cff'], ['#1f4a2e','#56d364'],
+  ['#4a2c1f','#ffa657'], ['#4a1f2e','#ff7b72'], ['#1f3a3a','#39d3d3'],
+];
+function avatarStyle(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return COLORS[Math.abs(h) % COLORS.length];
+}
+function initials(name) {
+  return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+}
+
+// ── API Calls ─────────────────────────────────────────────────────────────────
+async function fetchSessions() {
+  const r = await fetch(`${API}/api/sessions?limit=500`);
+  if (!r.ok) throw new Error(`Sessions: ${r.status}`);
+  return r.json();
+}
+async function fetchStats() {
+  const r = await fetch(`${API}/api/stats`);
+  if (!r.ok) throw new Error(`Stats: ${r.status}`);
+  return r.json();
+}
+async function fetchHosts() {
+  const r = await fetch(`${API}/api/hosts`);
+  if (!r.ok) throw new Error(`Hosts: ${r.status}`);
+  return r.json();
+}
+async function fetchRaw() {
+  const r = await fetch(`${API}/api/events/raw?limit=100`);
+  if (!r.ok) throw new Error(`Raw: ${r.status}`);
+  return r.json();
+}
+
+// ── Render Stats ──────────────────────────────────────────────────────────────
+function renderStats(s) {
+  $('m-active').textContent  = s.active;
+  $('m-disc').textContent    = s.disconnected;
+  $('m-ended').textContent   = s.ended_today;
+  $('m-hosts').textContent   = s.total_hosts;
+  $('m-users').textContent   = s.active_users;
+}
+
+// ── Render Host Filter ────────────────────────────────────────────────────────
+function renderHostFilter(hosts) {
+  const sel = $('f-host');
+  const cur = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  hosts.forEach(h => {
+    const o = document.createElement('option');
+    o.value = h.target_ip;
+    o.textContent = h.target_host ? `${h.target_ip}  (${h.target_host})` : h.target_ip;
+    sel.appendChild(o);
+  });
+  if (cur) sel.value = cur;
+}
+
+// ── Sort & Filter ─────────────────────────────────────────────────────────────
+function sortTable(key) {
+  if (sortKey === key) sortDir *= -1;
+  else { sortKey = key; sortDir = -1; }
+  document.querySelectorAll('thead th').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+  });
+  renderSessions();
+}
+
+function applyFilters() { renderSessions(); }
+
+function filteredSessions() {
+  const search = $('search').value.toLowerCase();
+  const status = $('f-status').value;
+  const host   = $('f-host').value;
+
+  return allSessions.filter(s => {
+    if (status && s.status !== status) return false;
+    if (host && s.target_ip !== host)  return false;
+    if (search) {
+      const hay = `${s.user} ${s.target_ip} ${s.source_ip || ''} ${s.target_host || ''}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (sortKey === 'duration') {
+      av = a.end_time ? new Date(a.end_time) - new Date(a.start_time)
+                       : Date.now() - new Date(a.start_time);
+      bv = b.end_time ? new Date(b.end_time) - new Date(b.start_time)
+                       : Date.now() - new Date(b.start_time);
+    }
+    av = av ?? '';
+    bv = bv ?? '';
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av < bv) return sortDir;
+    if (av > bv) return -sortDir;
+    return 0;
+  });
+}
+
+// ── Render Sessions ───────────────────────────────────────────────────────────
+function renderSessions() {
+  const rows = filteredSessions();
+  $('rowCount').textContent = `${rows.length} session${rows.length !== 1 ? 's' : ''}`;
+  const body = $('sessBody');
+
+  if (rows.length === 0) {
+    body.innerHTML = `<tr><td colspan="8" class="empty">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        <path d="M11 8v6M8 11h6"/>
+      </svg>
+      No sessions match the current filters
+    </td></tr>`;
+    return;
+  }
+
+  body.innerHTML = rows.map(s => {
+    const [bg, fg] = avatarStyle(s.user);
+    const durClass = s.status === 'active' ? 'live' : s.status === 'disconnected' ? 'disc' : 'ended';
+    return `<tr>
+      <td><div class="user-cell">
+        <div class="avatar" style="background:${bg};color:${fg}">${initials(s.user)}</div>
+        <span class="user-name" title="${s.user}">${s.user}</span>
+      </div></td>
+      <td><span class="host-chip">
+        <span class="dot-host"></span>
+        ${s.target_ip}${s.target_host ? `<span style="color:var(--muted);font-size:10px"> ${s.target_host}</span>` : ''}
+      </span></td>
+      <td><span class="src-ip">${s.source_ip || '—'}</span></td>
+      <td><div class="time-cell"><div class="t">${fmtTime(s.start_time)}</div><div class="d">${fmtDate(s.start_time)}</div></div></td>
+      <td><div class="time-cell"><div class="t">${fmtTime(s.end_time)}</div><div class="d">${s.end_time ? fmtDate(s.end_time) : ''}</div></div></td>
+      <td><span class="dur ${durClass}" data-start="${s.start_time}" data-end="${s.end_time || ''}">${elapsed(s.start_time, s.end_time)}</span></td>
+      <td><span class="status-pill ${s.status}">
+        <span class="status-dot ${s.status}"></span>${s.status}
+      </span></td>
+      <td><span class="event-badge">${s.event_id || '—'}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Live Timer Tick ───────────────────────────────────────────────────────────
+function tickTimers() {
+  document.querySelectorAll('.dur.live[data-start]').forEach(el => {
+    el.textContent = elapsed(el.dataset.start, null);
+  });
+}
+
+// ── Render Raw Events ─────────────────────────────────────────────────────────
+function renderRaw(events) {
+  $('rawCount').textContent = `${events.length} events`;
+  $('rawBody').innerHTML = events.map(e => `<tr>
+    <td>${fmtTime(e.received_at)}</td>
+    <td>${e.target_ip || '—'}</td>
+    <td><span class="event-badge">${e.event_id}</span></td>
+    <td>${e.user || '—'}</td>
+    <td>${e.source_ip || '—'}</td>
+    <td>${e.logon_id || '—'}</td>
+    <td>${fmtTime(e.event_time)}</td>
+  </tr>`).join('') || `<tr><td colspan="7" class="empty">No raw events yet</td></tr>`;
+}
+
+// ── Refresh All ───────────────────────────────────────────────────────────────
+async function refreshAll(manual = false) {
+  const btn = $('refreshBtn');
+  if (manual) btn.classList.add('spinning');
+  hideError();
+
+  try {
+    const [sessions, stats, hosts, raw] = await Promise.all([
+      fetchSessions(), fetchStats(), fetchHosts(), fetchRaw()
+    ]);
+    allSessions = sessions;
+    renderStats(stats);
+    renderHostFilter(hosts);
+    renderSessions();
+    renderRaw(raw);
+
+    $('connDot').style.background = 'var(--green)';
+    $('connDot').style.boxShadow  = '0 0 6px var(--green)';
+    $('lastUpdate').textContent   = 'Updated ' + new Date().toLocaleTimeString();
+  }
+  catch (err) {
+    $('connDot').style.background = 'var(--red)';
+    $('connDot').style.boxShadow  = '0 0 6px var(--red)';
+    showError(`Cannot reach backend at ${API} — ${err.message}`);
+    $('lastUpdate').textContent = 'Connection error';
+  }
+  finally {
+    setTimeout(() => btn.classList.remove('spinning'), 500);
+  }
+}
+
+function showError(msg) {
+  const bar = $('errorBar');
+  bar.textContent = '⚠ ' + msg;
+  bar.style.display = 'block';
+}
+function hideError() {
+  $('errorBar').style.display = 'none';
+}
+
+// ── Tab Switching ─────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const panels = document.querySelectorAll('.tab-panel');
+    t.classList.remove('active');
+    panels[i].classList.remove('active');
+  });
+  const idx = name === 'sessions' ? 0 : 1;
+  document.querySelectorAll('.tab')[idx].classList.add('active');
+  document.querySelectorAll('.tab-panel')[idx].classList.add('active');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+refreshAll();
+setInterval(refreshAll, POLL_MS);
+setInterval(tickTimers, 1000);
+</script>
+</body>
+</html>
